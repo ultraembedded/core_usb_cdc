@@ -54,10 +54,10 @@ begin
     8'd5: desc_rom_r = 8'h00;
     8'd6: desc_rom_r = 8'h00;
     8'd7: desc_rom_r = 8'h08;
-    8'd8: desc_rom_r = 8'h34;  // VID_L
-    8'd9: desc_rom_r = 8'h12;  // VID_H
-    8'd10: desc_rom_r = 8'h78; // PID_L 
-    8'd11: desc_rom_r = 8'h56; // PID_H
+    8'd8: desc_rom_r = 8'h50;  // VID_L
+    8'd9: desc_rom_r = 8'h1d;  // VID_H
+    8'd10: desc_rom_r = 8'h49; // PID_L 
+    8'd11: desc_rom_r = 8'h61; // PID_H
     8'd12: desc_rom_r = 8'h01;
     8'd13: desc_rom_r = 8'h01;
     8'd14: desc_rom_r = 8'h00;
