@@ -37,6 +37,7 @@
 //-----------------------------------------------------------------
 module usb_desc_rom
 (
+    input        hs_i,
     input  [7:0] addr_i,
     output [7:0] data_o
 );
@@ -53,7 +54,7 @@ begin
     8'd4: desc_rom_r = 8'h02;
     8'd5: desc_rom_r = 8'h00;
     8'd6: desc_rom_r = 8'h00;
-    8'd7: desc_rom_r = 8'h08;
+    8'd7: desc_rom_r = hs_i ? 8'h40 : 8'h08;
     8'd8: desc_rom_r = 8'h50;  // VID_L
     8'd9: desc_rom_r = 8'h1d;  // VID_H
     8'd10: desc_rom_r = 8'h49; // PID_L 
@@ -121,15 +122,15 @@ begin
     8'd72: desc_rom_r = 8'h05;
     8'd73: desc_rom_r = 8'h01;
     8'd74: desc_rom_r = 8'h02;
-    8'd75: desc_rom_r = 8'h40;
-    8'd76: desc_rom_r = 8'h00;
+    8'd75: desc_rom_r = hs_i ? 8'h00 : 8'h40;
+    8'd76: desc_rom_r = hs_i ? 8'h02 : 8'h00;
     8'd77: desc_rom_r = 8'h00;
     8'd78: desc_rom_r = 8'h07;
     8'd79: desc_rom_r = 8'h05;
     8'd80: desc_rom_r = 8'h82;
     8'd81: desc_rom_r = 8'h02;
-    8'd82: desc_rom_r = 8'h40;
-    8'd83: desc_rom_r = 8'h00;
+    8'd82: desc_rom_r = hs_i ? 8'h00 : 8'h40;
+    8'd83: desc_rom_r = hs_i ? 8'h02 : 8'h00;
     8'd84: desc_rom_r = 8'h00;
     8'd85: desc_rom_r = 8'h04;
     8'd86: desc_rom_r = 8'h03;

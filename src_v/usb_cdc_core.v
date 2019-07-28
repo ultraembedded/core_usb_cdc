@@ -67,6 +67,9 @@ module usb_cdc_core
 
 
 
+
+parameter USB_SPEED_HS = "False"; // True or False
+
 //-----------------------------------------------------------------
 // Defines
 //-----------------------------------------------------------------
@@ -264,6 +267,182 @@ wire        ep3_tx_data_last_w;
 wire        ep3_tx_data_accept_w;
 wire        ep3_tx_stall_w;
 
+wire utmi_chirp_en_w;
+wire usb_hs_w;
+
+//-----------------------------------------------------------------
+// Transceiver Control (high speed)
+//-----------------------------------------------------------------
+generate 
+if (USB_SPEED_HS == "True")
+begin
+
+localparam STATE_W                       = 3;
+localparam STATE_IDLE                    = 3'd0;
+localparam STATE_WAIT_RST                = 3'd1;
+localparam STATE_SEND_CHIRP_K            = 3'd2;
+localparam STATE_WAIT_CHIRP_JK           = 3'd3;
+localparam STATE_FULLSPEED               = 3'd4;
+localparam STATE_HIGHSPEED               = 3'd5;
+reg [STATE_W-1:0] state_q;
+reg [STATE_W-1:0] next_state_r;
+
+// 60MHz clock rate
+`define USB_RST_W  20
+reg [`USB_RST_W-1:0] usb_rst_time_q;
+reg [7:0]            chirp_count_q;
+reg [1:0]            last_linestate_q;
+
+localparam DETACH_TIME    = 20'd60000;  // 1ms -> T0
+localparam ATTACH_FS_TIME = 20'd180000; // T0 + 3ms = T1
+localparam CHIRPK_TIME    = 20'd246000; // T1 + ~1ms
+localparam HS_RESET_TIME  = 20'd600000; // T0 + 10ms = T9
+localparam HS_CHIRP_COUNT = 8'd5;
+
+reg [  1:0]  utmi_op_mode_r;
+reg [  1:0]  utmi_xcvrselect_r;
+reg          utmi_termselect_r;
+reg          utmi_dppulldown_r;
+reg          utmi_dmpulldown_r;
+
+always @ *
+begin
+    next_state_r = state_q;
+
+    // Default - disconnect
+    utmi_op_mode_r    = 2'd1;
+    utmi_xcvrselect_r = 2'd0;
+    utmi_termselect_r = 1'b0;
+    utmi_dppulldown_r = 1'b0;
+    utmi_dmpulldown_r = 1'b0;
+
+    case (state_q)
+    STATE_IDLE:
+    begin
+        // Detached
+        if (enable_i && usb_rst_time_q >= DETACH_TIME)
+            next_state_r = STATE_WAIT_RST;
+    end
+    STATE_WAIT_RST:
+    begin
+        // Assert FS mode, check for SE0 (T0)
+        utmi_op_mode_r    = 2'd0;
+        utmi_xcvrselect_r = 2'd1;
+        utmi_termselect_r = 1'b1;
+        utmi_dppulldown_r = 1'b0;
+        utmi_dmpulldown_r = 1'b0;
+
+        // Wait for SE0 (T1), send device chirp K
+        if (usb_rst_time_q >= ATTACH_FS_TIME)
+            next_state_r = STATE_SEND_CHIRP_K;
+    end
+    STATE_SEND_CHIRP_K:
+    begin
+        // Send chirp K
+        utmi_op_mode_r    = 2'd2;
+        utmi_xcvrselect_r = 2'd0;
+        utmi_termselect_r = 1'b1;
+        utmi_dppulldown_r = 1'b0;
+        utmi_dmpulldown_r = 1'b0;
+
+        // End of device chirp K (T2)
+        if (usb_rst_time_q >= CHIRPK_TIME)
+            next_state_r = STATE_WAIT_CHIRP_JK;
+    end
+    STATE_WAIT_CHIRP_JK:
+    begin
+        // Stop sending chirp K and wait for downstream port chirps
+        utmi_op_mode_r    = 2'd2;
+        utmi_xcvrselect_r = 2'd0;
+        utmi_termselect_r = 1'b1;
+        utmi_dppulldown_r = 1'b0;
+        utmi_dmpulldown_r = 1'b0;
+
+        // Required number of chirps detected, move to HS mode (T7)
+        if (chirp_count_q >= HS_CHIRP_COUNT)
+            next_state_r = STATE_HIGHSPEED;
+        // Time out waiting for chirps, fallback to FS mode
+        else if (usb_rst_time_q >= HS_RESET_TIME)
+            next_state_r = STATE_FULLSPEED;
+    end
+    STATE_FULLSPEED:
+    begin
+        utmi_op_mode_r    = 2'd0;
+        utmi_xcvrselect_r = 2'd1;
+        utmi_termselect_r = 1'b1;
+        utmi_dppulldown_r = 1'b0;
+        utmi_dmpulldown_r = 1'b0;
+
+        // USB reset detected...
+        if (usb_rst_time_q >= HS_RESET_TIME && usb_reset_w)
+            next_state_r = STATE_WAIT_RST;
+    end
+    STATE_HIGHSPEED:
+    begin
+        // Enter HS mode
+        utmi_op_mode_r    = 2'd0;
+        utmi_xcvrselect_r = 2'd0;
+        utmi_termselect_r = 1'b0;
+        utmi_dppulldown_r = 1'b0;
+        utmi_dmpulldown_r = 1'b0;
+
+        // Long SE0 - could be reset or suspend
+        // TODO: Should revert to FS mode and check...
+        if (usb_rst_time_q >= HS_RESET_TIME && usb_reset_w)
+            next_state_r = STATE_WAIT_RST;
+    end
+    default:
+        ;
+    endcase
+end
+
+// Update state
+always @ (posedge clk_i or posedge rst_i)
+if (rst_i)
+    state_q   <= STATE_IDLE;
+else
+    state_q   <= next_state_r;
+
+// Time since T0 (start of HS reset)
+always @ (posedge clk_i or posedge rst_i)
+if (rst_i)
+    usb_rst_time_q <= `USB_RST_W'b0;
+// Entering wait for reset state
+else if (next_state_r == STATE_WAIT_RST && state_q != STATE_WAIT_RST)
+    usb_rst_time_q <=  `USB_RST_W'b0;
+// Waiting for reset, reset count on line state toggle
+else if (state_q == STATE_WAIT_RST && (utmi_linestate_i != 2'b00))
+    usb_rst_time_q <=  `USB_RST_W'b0;
+else if (usb_rst_time_q != {(`USB_RST_W){1'b1}})
+    usb_rst_time_q <= usb_rst_time_q + `USB_RST_W'd1;
+
+always @ (posedge clk_i or posedge rst_i)
+if (rst_i)
+    last_linestate_q   <= 2'b0;
+else
+    last_linestate_q   <= utmi_linestate_i;
+
+// Chirp counter
+always @ (posedge clk_i or posedge rst_i)
+if (rst_i)
+    chirp_count_q   <= 8'b0;
+else if (state_q == STATE_SEND_CHIRP_K)
+    chirp_count_q   <= 8'b0;
+else if (state_q == STATE_WAIT_CHIRP_JK && (last_linestate_q != utmi_linestate_i) && chirp_count_q != 8'hFF)
+    chirp_count_q   <= chirp_count_q + 8'd1;
+
+assign utmi_op_mode_o    = utmi_op_mode_r;
+assign utmi_xcvrselect_o = utmi_xcvrselect_r;
+assign utmi_termselect_o = utmi_termselect_r;
+assign utmi_dppulldown_o = utmi_dppulldown_r;
+assign utmi_dmpulldown_o = utmi_dmpulldown_r;
+
+assign utmi_chirp_en_w   = (state_q == STATE_SEND_CHIRP_K);
+assign usb_hs_w          = (state_q == STATE_HIGHSPEED);
+
+end
+else
+begin
 //-----------------------------------------------------------------
 // Transceiver Control
 //-----------------------------------------------------------------
@@ -299,6 +478,12 @@ assign utmi_termselect_o = utmi_termselect_r;
 assign utmi_dppulldown_o = utmi_dppulldown_r;
 assign utmi_dmpulldown_o = utmi_dmpulldown_r;
 
+assign utmi_chirp_en_w   = 1'b0;
+assign usb_hs_w          = 1'b0;
+
+end
+endgenerate
+
 //-----------------------------------------------------------------
 // Core
 //-----------------------------------------------------------------
@@ -320,7 +505,7 @@ u_core
     .utmi_rxerror_i(utmi_rxerror_i),
     .utmi_linestate_i(utmi_linestate_i),
 
-    .reg_chirp_en_i(1'b0),
+    .reg_chirp_en_i(utmi_chirp_en_w),
     .reg_int_en_sof_i(1'b0),
 
     .reg_dev_addr_i(device_addr_q),
@@ -761,7 +946,7 @@ begin
         ctrl_txvalid_r  = 1'b1;
         ctrl_txdata_r   = desc_data_w;
         ctrl_txstrb_r   = 1'b1;
-        ctrl_txlast_r   = ctrl_send_idx_r[2:0] == 3'b111;
+        ctrl_txlast_r   = usb_hs_w ? (ctrl_send_idx_r[5:0] == 6'b111111) : (ctrl_send_idx_r[2:0] == 3'b111);
 
         // Increment send index
         ctrl_send_idx_r = ctrl_send_idx_r + 16'd1;
@@ -832,6 +1017,7 @@ assign ep0_tx_stall_w      = ctrl_txstall_q;
 usb_desc_rom
 u_rom
 (
+    .hs_i(usb_hs_w),
     .addr_i(desc_addr_q),
     .data_o(desc_data_w)
 );
