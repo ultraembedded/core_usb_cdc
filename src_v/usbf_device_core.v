@@ -729,10 +729,22 @@ reg addr_update_pending_q;
 wire ep0_tx_zlp_w = ep0_tx_data_valid_i && (ep0_tx_data_strb_i == 1'b0) && 
                     ep0_tx_data_last_i && ep0_tx_data_accept_o;
 
+reg sent_status_zlp_q;
+
+always @ (posedge clk_i or posedge rst_i)
+if (rst_i)
+    sent_status_zlp_q   <= 1'b0;
+else if (usb_rst_w)
+    sent_status_zlp_q   <= 1'b0;
+else if (ep0_tx_zlp_w)
+    sent_status_zlp_q   <= 1'b1;
+else if (rx_handshake_w)
+    sent_status_zlp_q   <= 1'b0;
+
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i)
     addr_update_pending_q   <= 1'b0;
-else if (ep0_tx_zlp_w || usb_rst_w)
+else if ((sent_status_zlp_q && addr_update_pending_q && rx_handshake_w && token_pid_w == `PID_ACK) || usb_rst_w)
     addr_update_pending_q   <= 1'b0;
 // TODO: Use write strobe
 else if (reg_dev_addr_i != current_addr_q)
@@ -743,7 +755,7 @@ if (rst_i)
     current_addr_q  <= `USB_DEV_W'b0;
 else if (usb_rst_w)
     current_addr_q  <= `USB_DEV_W'b0;
-else if (ep0_tx_zlp_w && addr_update_pending_q)
+else if (sent_status_zlp_q && addr_update_pending_q && rx_handshake_w && token_pid_w == `PID_ACK)
     current_addr_q  <= reg_dev_addr_i;
 
 //-----------------------------------------------------------------
@@ -755,7 +767,7 @@ reg ep0_dir_out_q;
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i)
     ep0_dir_in_q <= 1'b0;
-else if (usb_rst_w ||reg_chirp_en_i)
+else if (usb_rst_w || reg_chirp_en_i)
     ep0_dir_in_q <= 1'b0;
 else if ((state_q == STATE_RX_IDLE) && token_valid_w && (token_pid_w == `PID_SETUP) && (token_ep_w == 4'd0))
     ep0_dir_in_q <= 1'b0;

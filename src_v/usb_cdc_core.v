@@ -1044,9 +1044,9 @@ assign ep3_rx_space_w      = 1'b0;
 //-----------------------------------------------------------------
 // Stream I/O
 //-----------------------------------------------------------------
-reg       inport_valid_q;
-reg [7:0] inport_data_q;
-wire      inport_last_w  = !inport_valid_i;
+reg        inport_valid_q;
+reg [7:0]  inport_data_q;
+reg [10:0] inport_cnt_q;
 
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i)
@@ -1059,6 +1059,17 @@ begin
     inport_valid_q <= inport_valid_i;
     inport_data_q  <= inport_data_i;
 end
+
+wire [10:0] max_packet_w   = usb_hs_w ? 11'd511 : 11'd63;
+wire        inport_last_w  = !inport_valid_i || (inport_cnt_q == max_packet_w);
+
+always @ (posedge clk_i or posedge rst_i)
+if (rst_i)
+    inport_cnt_q  <= 11'b0;
+else if (inport_last_w && ep2_tx_data_accept_w)
+    inport_cnt_q  <= 11'b0;
+else if (inport_valid_q && ep2_tx_data_accept_w)
+    inport_cnt_q  <= inport_cnt_q + 11'd1;
 
 assign ep2_tx_data_valid_w = inport_valid_q;
 assign ep2_tx_data_w       = inport_data_q;
