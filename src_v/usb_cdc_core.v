@@ -607,6 +607,7 @@ reg [7:0] setup_packet_q[0:7];
 reg [2:0] setup_wr_idx_q;
 reg       setup_frame_q;
 reg       setup_valid_q;
+reg       setup_data_q;
 reg       status_ready_q; // STATUS response received
 
 always @ (posedge clk_i or posedge rst_i)
@@ -623,6 +624,7 @@ begin
     setup_wr_idx_q     <= 3'b0;
     setup_valid_q      <= 1'b0;
     setup_frame_q      <= 1'b0;
+    setup_data_q       <= 1'b0;
     status_ready_q     <= 1'b0;
 end
 // SETUP token received
@@ -639,6 +641,7 @@ begin
     setup_wr_idx_q     <= 3'b0;
     setup_valid_q      <= 1'b0;
     setup_frame_q      <= 1'b1;
+    setup_data_q       <= 1'b0;
     status_ready_q     <= 1'b0;
 end
 // Valid DATA for setup frame
@@ -647,6 +650,7 @@ begin
     setup_packet_q[setup_wr_idx_q] <= rx_data_w;
     setup_wr_idx_q      <= setup_wr_idx_q + 3'd1;
     setup_valid_q       <= setup_frame_q && rx_last_w;
+    setup_data_q        <= !setup_frame_q && rx_last_w;
     if (rx_last_w)
         setup_frame_q   <= 1'b0;
 end
@@ -693,18 +697,25 @@ reg [6:0]  device_addr_r;
 reg        configured_q;
 reg        configured_r;
 
+reg        set_with_data_q;
+reg        set_with_data_r;
+wire       data_status_zlp_w;
+
 always @ *
 begin
-    ctrl_stall_r   = 1'b0;
-    ctrl_get_len_r = 16'b0;
-    ctrl_ack_r     = 1'b0;
-    desc_addr_r    = 8'b0;
-    device_addr_r  = device_addr_q;
-    addressed_r    = addressed_q;
-    configured_r   = configured_q;
+    ctrl_stall_r    = 1'b0;
+    ctrl_get_len_r  = 16'b0;
+    ctrl_ack_r      = 1'b0;
+    desc_addr_r     = 8'b0;
+    device_addr_r   = device_addr_q;
+    addressed_r     = addressed_q;
+    configured_r    = configured_q;
+    set_with_data_r = set_with_data_q;
 
     if (setup_valid_q)
     begin
+        set_with_data_r = 1'b0;
+
         case (bmRequestType_w & `USB_REQUEST_TYPE_MASK)
         `USB_STANDARD_REQUEST:
         begin
@@ -832,7 +843,10 @@ begin
                 ctrl_get_len_r = `ROM_CDC_LINE_CODING_SIZE;
             end
             default:
-                ctrl_ack_r   = setup_set_w && setup_no_data_w;
+            begin
+                ctrl_ack_r      = setup_set_w && setup_no_data_w;
+                set_with_data_r = setup_set_w && !setup_no_data_w;
+            end
             endcase
         end
         default:
@@ -841,26 +855,31 @@ begin
         end
         endcase
     end
+    else if (data_status_zlp_w)
+        set_with_data_r = 1'b0;
 end
 
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i)
 begin
-    device_addr_q  <= 7'b0;
-    addressed_q    <= 1'b0;
-    configured_q   <= 1'b0;
+    device_addr_q   <= 7'b0;
+    addressed_q     <= 1'b0;
+    configured_q    <= 1'b0;
+    set_with_data_q <= 1'b0;
 end
 else if (usb_reset_w)
 begin
-    device_addr_q  <= 7'b0;
-    addressed_q    <= 1'b0;
-    configured_q   <= 1'b0;
+    device_addr_q   <= 7'b0;
+    addressed_q     <= 1'b0;
+    configured_q    <= 1'b0;
+    set_with_data_q <= 1'b0;
 end
 else
 begin
-    device_addr_q  <= device_addr_r;
-    addressed_q    <= addressed_r;
-    configured_q   <= configured_r;
+    device_addr_q   <= device_addr_r;
+    addressed_q     <= addressed_r;
+    configured_q    <= configured_r;
+    set_with_data_q <= set_with_data_r;
 end
 
 //-----------------------------------------------------------------
@@ -940,6 +959,14 @@ begin
 
         ctrl_txvalid_r  = 1'b0;
     end
+    // Send STATUS response (ZLP)
+    else if (set_with_data_q && setup_data_q)
+    begin
+        ctrl_txvalid_r  = 1'b1;
+        ctrl_txstrb_r   = 1'b0;
+        ctrl_txlast_r   = 1'b1;
+        ctrl_txstall_r  = 1'b0;
+    end
     else if (ctrl_sending_r && ctrl_send_accept_w)
     begin
         // TODO: Send ZLP on exact multiple lengths...
@@ -961,6 +988,8 @@ begin
     else if (ctrl_send_accept_w)
         ctrl_txvalid_r  = 1'b0;
 end
+
+assign data_status_zlp_w = set_with_data_q && setup_data_q && ctrl_send_accept_w;
 
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i)
