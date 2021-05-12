@@ -1,0 +1,33 @@
+CAPI=2:
+
+name : ultraembedded:core:usb_cdc:0
+description : USB Peripheral Interface (Device) implementation which enumerates as either a high-speed (480Mbit/s) or full-speed (12Mbit/s) CDC-ACM device
+filesets:
+  rtl:
+    files:
+      - src_v/usb_desc_rom.v
+      - src_v/usbf_crc16.v
+      - src_v/usbf_defs.v : {is_include_file : true}
+      - src_v/usbf_device_core.v
+      - src_v/usbf_sie_rx.v
+      - src_v/usbf_sie_tx.v
+      - src_v/usb_cdc_core.v
+    file_type : verilogSource
+
+  openlane: {files: [data/sky130.tcl : {file_type : tclSource}]}
+
+targets:
+  default:
+    filesets : [rtl]
+
+  lint:
+    default_tool : verilator
+    filesets : [rtl]
+    tools:
+      verilator: {mode : lint-only}
+    toplevel: usb_cdc_core
+
+  sky130:
+    default_tool : openlane
+    filesets : [rtl, openlane]
+    toplevel: usb_cdc_core
