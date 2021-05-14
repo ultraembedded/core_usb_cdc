@@ -4,37 +4,24 @@ on: [push]
 jobs:
   build-openlane:
     runs-on: ubuntu-latest
-    env:
-      REPO : core_usb_cdc
-      VLNV : ultraembedded:core:usb_cdc
     steps:
       - name: Checkout repo
         uses: actions/checkout@v2
+      - name: Build with Openlane
+        uses: librecores/ci-fusesoc-action@v1
         with:
-          path: core_usb_cdc
-      - name: Checkout pdk
-        uses: actions/checkout@v2
-        with:
-          repository: olofk/pdklite
-          path: pdklite
-      - run: echo "PDK_ROOT=$GITHUB_WORKSPACE/pdklite" >> $GITHUB_ENV
-      - run: echo "EDALIZE_LAUNCHER=${GITHUB_WORKSPACE}/$REPO/.github/workflows/openlane_runner.py" >> $GITHUB_ENV
-      - run: pip3 install --user -e "git+https://github.com/olofk/edalize.git#egg=edalize"
-      - run: pip3 install fusesoc
-      - run: fusesoc library add $REPO $GITHUB_WORKSPACE/$REPO
-      - run: fusesoc run --target=sky130 $VLNV
+          core: ultraembedded:core:usb_cdc
+          target: sky130
+          tool: openlane
 
   lint-verilator:
     runs-on: ubuntu-latest
-    env:
-      REPO : core_usb_cdc
-      VLNV : ultraembedded:core:usb_cdc
     steps:
       - name: Checkout repo
         uses: actions/checkout@v2
+      - name: Lint with Verilator
+        uses: librecores/ci-fusesoc-action@v1
         with:
-          path: core_usb_cdc
-      - run: sudo apt install verilator
-      - run: pip3 install fusesoc
-      - run: fusesoc library add $REPO $GITHUB_WORKSPACE/$REPO
-      - run: fusesoc run --target=lint $VLNV
+          core: ultraembedded:core:usb_cdc
+          target: lint
+          tool: verilator
